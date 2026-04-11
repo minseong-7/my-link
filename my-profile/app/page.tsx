@@ -25,6 +25,7 @@ export default function Home() {
                   height={160}
                   className="object-cover w-full h-full transform group-hover:scale-110 transition duration-500"
                   priority
+                  unoptimized
                 />
               </div>
             </div>
