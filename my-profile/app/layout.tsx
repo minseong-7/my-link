@@ -25,9 +25,9 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
-      className={`${inter.variable} ${outfit.variable} h-full antialiased dark`}
+      className={`${inter.variable} ${outfit.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans transition-colors duration-500 bg-[#030014] text-gray-100">
+      <body className="min-h-full flex flex-col font-sans bg-[#F4F0EA] text-gray-900 selection:bg-pink-300 selection:text-black">
         {children}
       </body>
     </html>
