@@ -1,9 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { DUMMY_LINKS } from "@/data/links"
+import { useState, useEffect } from "react"
 import { db } from "@/lib/firebase"
-import { collection, addDoc } from "firebase/firestore"
+import { collection, addDoc, query, orderBy, onSnapshot } from "firebase/firestore"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,13 +32,32 @@ const linkSchema = z.object({
 type LinkFormValues = z.infer<typeof linkSchema>
 
 export default function Page() {
-  const [links, setLinks] = useState(DUMMY_LINKS)
+  const [links, setLinks] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "users", "anonymous", "links"),
+      orderBy("createdAt", "desc")
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedLinks = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setLinks(fetchedLinks);
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isValid },
+    formState: { errors, isSubmitting },
     reset,
   } = useForm<LinkFormValues>({
     resolver: zodResolver(linkSchema),
@@ -57,20 +75,15 @@ export default function Page() {
     }
 
     try {
-      const docRef = await addDoc(collection(db, "users", "anonymous", "links"), {
+      // 로딩 스피너를 시각적으로 보여주기 위한 인위적 지연 (0.6초)
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      await addDoc(collection(db, "users", "anonymous", "links"), {
         title: data.title,
         url: finalUrl,
         createdAt: new Date().toISOString(),
       });
 
-      const newLink = {
-        id: docRef.id,
-        title: data.title,
-        url: finalUrl,
-        createdAt: new Date().toISOString(),
-      }
-
-      setLinks([...links, newLink])
       reset()
       setIsDialogOpen(false)
     } catch (e) {
@@ -143,13 +156,37 @@ export default function Page() {
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>취소</Button>
-                  <Button type="submit">추가하기</Button>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        추가 중...
+                      </>
+                    ) : "추가하기"}
+                  </Button>
                 </DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
 
-          {links.map((link) => (
+          {isLoading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="block w-full">
+                <Card className="relative w-full flex items-center p-4 overflow-hidden border border-border/50 bg-background/40 shadow-sm animate-pulse">
+                  <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mr-4 shrink-0"></div>
+                  <div className="h-5 bg-muted/50 rounded w-1/2"></div>
+                </Card>
+              </div>
+            ))
+          ) : links.length === 0 ? (
+             <div className="text-center p-8 mt-4 text-muted-foreground border border-dashed border-border/50 rounded-lg bg-background/30 backdrop-blur-sm">
+               아직 등록된 링크가 없습니다.<br/>위 버튼을 눌러 새로운 링크를 추가해 보세요!
+             </div>
+          ) : (
+            links.map((link) => (
             <a
               key={link.id}
               href={link.url}
@@ -173,7 +210,7 @@ export default function Page() {
                 </div>
               </Card>
             </a>
-          ))}
+          )))}
         </div>
       </div>
     </div>
