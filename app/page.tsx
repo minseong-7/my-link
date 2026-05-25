@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { DUMMY_LINKS } from "@/data/links"
+import { db } from "@/lib/firebase"
+import { collection, addDoc } from "firebase/firestore"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -48,22 +50,33 @@ export default function Page() {
     mode: "onChange",
   })
 
-  const onSubmit = (data: LinkFormValues) => {
+  const onSubmit = async (data: LinkFormValues) => {
     let finalUrl = data.url
     if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
       finalUrl = `https://${finalUrl}`
     }
 
-    const newLink = {
-      id: Date.now().toString(),
-      title: data.title,
-      url: finalUrl,
-      createdAt: new Date().toISOString(),
-    }
+    try {
+      const docRef = await addDoc(collection(db, "users", "anonymous", "links"), {
+        title: data.title,
+        url: finalUrl,
+        createdAt: new Date().toISOString(),
+      });
 
-    setLinks([...links, newLink])
-    reset()
-    setIsDialogOpen(false)
+      const newLink = {
+        id: docRef.id,
+        title: data.title,
+        url: finalUrl,
+        createdAt: new Date().toISOString(),
+      }
+
+      setLinks([...links, newLink])
+      reset()
+      setIsDialogOpen(false)
+    } catch (e) {
+      console.error("Error adding document: ", e);
+      // Optional: Add some user feedback here if it fails
+    }
   }
 
   const handleOpenChange = (open: boolean) => {
