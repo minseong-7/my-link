@@ -1,7 +1,75 @@
+"use client"
+
+import { useState } from "react"
 import { DUMMY_LINKS } from "@/data/links"
 import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import * as z from "zod"
+
+const urlRegex = /^(https?:\/\/)?((([a-zA-Z\d]([a-zA-Z\d-]*[a-zA-Z\d])*)\.)+[a-zA-Z]{2,}|((\d{1,3}\.){3}\d{1,3}))(:\d+)?(\/[-a-zA-Z\d%_.~+]*)*(\?[;&a-zA-Z\d%_.~+=-]*)?(#[a-zA-Z\d_]*)?$/i;
+
+const linkSchema = z.object({
+  title: z.string().trim().min(1, { message: "제목을 입력해주세요." }),
+  url: z.string().trim()
+    .min(1, { message: "URL을 입력해주세요." })
+    .regex(urlRegex, { message: "올바른 URL 형식(예: example.com 또는 https://example.com)을 입력해주세요." })
+})
+
+type LinkFormValues = z.infer<typeof linkSchema>
 
 export default function Page() {
+  const [links, setLinks] = useState(DUMMY_LINKS)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isValid },
+    reset,
+  } = useForm<LinkFormValues>({
+    resolver: zodResolver(linkSchema),
+    defaultValues: {
+      title: "",
+      url: "",
+    },
+    mode: "onChange",
+  })
+
+  const onSubmit = (data: LinkFormValues) => {
+    let finalUrl = data.url
+    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+      finalUrl = `https://${finalUrl}`
+    }
+
+    const newLink = {
+      id: Date.now().toString(),
+      title: data.title,
+      url: finalUrl,
+      createdAt: new Date().toISOString(),
+    }
+
+    setLinks([...links, newLink])
+    reset()
+    setIsDialogOpen(false)
+  }
+
+  const handleOpenChange = (open: boolean) => {
+    setIsDialogOpen(open)
+    if (!open) reset()
+  }
   return (
     <div className="relative flex min-h-svh flex-col items-center p-6 overflow-hidden bg-background">
       {/* Background Glow Effects */}
@@ -21,7 +89,54 @@ export default function Page() {
         </div>
 
         <div className="flex flex-col gap-4">
-          {DUMMY_LINKS.map((link) => (
+          <Dialog open={isDialogOpen} onOpenChange={handleOpenChange}>
+            <DialogTrigger 
+              render={
+                <Button className="w-full h-14 shadow-md hover:shadow-lg transition-all font-semibold text-base" />
+              }
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              새 링크 추가
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>새 링크 추가</DialogTitle>
+                <DialogDescription>
+                  추가할 링크의 제목과 URL을 입력해주세요.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit(onSubmit)}>
+                <div className="flex flex-col gap-4 py-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="title">제목</Label>
+                    <Input 
+                      id="title" 
+                      placeholder="예: 내 기술 블로그" 
+                      aria-invalid={!!errors.title}
+                      {...register("title")}
+                    />
+                    {errors.title && <p className="text-sm font-medium text-destructive">{errors.title.message}</p>}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="url">URL</Label>
+                    <Input 
+                      id="url" 
+                      placeholder="예: blog.example.com" 
+                      aria-invalid={!!errors.url}
+                      {...register("url")}
+                    />
+                    {errors.url && <p className="text-sm font-medium text-destructive">{errors.url.message}</p>}
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>취소</Button>
+                  <Button type="submit">추가하기</Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          {links.map((link) => (
             <a
               key={link.id}
               href={link.url}
