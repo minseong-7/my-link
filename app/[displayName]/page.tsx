@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { use } from "react"
 import { db } from "@/lib/firebase"
 import { collection, query, where, getDocs, orderBy, doc, updateDoc, increment } from "firebase/firestore"
 import { notFound } from "next/navigation"
@@ -8,13 +8,14 @@ import { useQuery } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
 
 interface PageProps {
-  params: {
+  params: Promise<{
     displayName: string
-  }
+  }>
 }
 
-export default function PublicProfilePage({ params }: PageProps) {
-  const { displayName } = params
+export default function PublicProfilePage(props: PageProps) {
+  const params = use(props.params)
+  const displayName = params.displayName
 
   const { data: userData, isLoading: isUserLoading, error } = useQuery({
     queryKey: ['public-profile', displayName],

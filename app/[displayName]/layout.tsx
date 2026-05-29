@@ -3,12 +3,13 @@ import { db } from "@/lib/firebase"
 import { collection, query, where, getDocs } from "firebase/firestore"
 
 type Props = {
-  params: { displayName: string }
+  params: Promise<{ displayName: string }>
 }
 
 export async function generateMetadata(
-  { params }: Props
+  props: Props
 ): Promise<Metadata> {
+  const params = await props.params;
   const displayName = params.displayName;
   
   try {
