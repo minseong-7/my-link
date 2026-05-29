@@ -22,6 +22,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { toast } from "sonner"
+import { useRouter } from "next/navigation"
 
 const urlRegex = /^(https?:\/\/)?((([a-zA-Z\d]([a-zA-Z\d-]*[a-zA-Z\d])*)\.)+[a-zA-Z]{2,}|((\d{1,3}\.){3}\d{1,3}))(:\d+)?(\/[-a-zA-Z\d%_.~+]*)*(\?[;&a-zA-Z\d%_.~+=-]*)?(#[a-zA-Z\d_]*)?$/i;
 
@@ -187,7 +188,13 @@ function LinkItem({ link, userId }: { link: any, userId: string }) {
               className="w-6 h-6 object-contain"
             />
           </div>
-          <span className="font-semibold text-lg text-foreground/90 group-hover:text-primary transition-colors flex-1 truncate text-left">{link.title}</span>
+                  <div className="flex-1 min-w-0 mr-2">
+                    <span className="font-semibold text-lg text-foreground/90 group-hover:text-primary transition-colors block truncate text-left">{link.title}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-muted-foreground/70 shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                    <span className="text-xs font-semibold">{link.clickCount || 0}</span>
+                  </div>
         </Card>
       </a>
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 z-10">
@@ -244,6 +251,7 @@ export default function Page() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isAuthChecking, setIsAuthChecking] = useState(true)
   const [user, setUser] = useState<User | null>(null)
+  const router = useRouter()
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -340,6 +348,7 @@ export default function Page() {
         title: data.title,
         url: finalUrl,
         createdAt: new Date().toISOString(),
+        clickCount: 0,
       };
       const docRef = await addDoc(collection(db, "users", user!.uid, "links"), newDoc);
       return { id: docRef.id, ...newDoc };
@@ -352,7 +361,7 @@ export default function Page() {
         finalUrl = `https://${finalUrl}`
       }
       queryClient.setQueryData(['links', user?.uid], (old: any) => [
-        { id: "temp-" + Date.now(), title: newData.title, url: finalUrl, createdAt: new Date().toISOString() },
+        { id: "temp-" + Date.now(), title: newData.title, url: finalUrl, createdAt: new Date().toISOString(), clickCount: 0 },
         ...(old || [])
       ]);
       return { previousLinks };
@@ -574,6 +583,10 @@ export default function Page() {
                 <Button variant="ghost" className="w-full justify-start text-sm h-9 px-3 font-normal" onClick={() => { setIsDropdownOpen(false); handleShare(); }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 opacity-70"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
                   공유하기
+                </Button>
+                <Button variant="ghost" className="w-full justify-start text-sm h-9 px-3 font-normal" onClick={() => { setIsDropdownOpen(false); router.push('/stats'); }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 opacity-70"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                  통계 보기
                 </Button>
               </div>
               <div className="p-2 border-t border-border/50">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { db } from "@/lib/firebase"
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore"
+import { collection, query, where, getDocs, orderBy, doc, updateDoc, increment } from "firebase/firestore"
 import { notFound } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
@@ -65,6 +65,15 @@ export default function PublicProfilePage({ params }: PageProps) {
     )
   }
 
+  const handleLinkClick = (linkId: string) => {
+    if (userData?.id) {
+      const linkRef = doc(db, "users", userData.id, "links", linkId);
+      updateDoc(linkRef, {
+        clickCount: increment(1)
+      }).catch(console.error);
+    }
+  };
+
   const realName = userData?.username || "사용자 이름"
   const bio = userData?.bio || ""
 
@@ -102,6 +111,7 @@ export default function PublicProfilePage({ params }: PageProps) {
                 href={link.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => handleLinkClick(link.id)}
                 className="block w-full outline-none group"
               >
                 <Card className="relative w-full flex items-center p-4 overflow-hidden border border-border/50 bg-background/40 backdrop-blur-md shadow-sm transition-all duration-300 hover:shadow-md hover:bg-background/80 hover:border-primary/50 group-hover:-translate-y-1 focus-visible:ring-2 focus-visible:ring-primary">

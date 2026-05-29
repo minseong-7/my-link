@@ -20,7 +20,10 @@ service cloud.firestore {
       // users/{userId}/links 서브컬렉션
       match /links/{linkId} {
         allow read: if true;
-        allow write: if isOwner(userId);
+        allow create, delete: if isOwner(userId);
+        allow update: if isOwner(userId) || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clickCount'])
+        );
       }
       
       // users/{userId}/profile 서브컬렉션
