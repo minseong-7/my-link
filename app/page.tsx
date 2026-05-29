@@ -295,7 +295,13 @@ export default function Page() {
         await setDoc(userRef, newProfile);
         return newProfile;
       }
-      return userSnap.data();
+      const data = userSnap.data();
+      if (!data.displayName) {
+        const defaultEmailPrefix = user.email ? user.email.split('@')[0] : user.uid;
+        await updateDoc(userRef, { displayName: defaultEmailPrefix });
+        data.displayName = defaultEmailPrefix;
+      }
+      return data;
     },
     enabled: !!user,
   });
