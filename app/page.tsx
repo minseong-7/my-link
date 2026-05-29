@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { db, auth } from "@/lib/firebase"
-import { collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from "firebase/firestore"
+import { collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, getDoc, setDoc } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User } from "firebase/auth"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
+import { toast } from "sonner"
 
 const urlRegex = /^(https?:\/\/)?((([a-zA-Z\d]([a-zA-Z\d-]*[a-zA-Z\d])*)\.)+[a-zA-Z]{2,}|((\d{1,3}\.){3}\d{1,3}))(:\d+)?(\/[-a-zA-Z\d%_.~+]*)*(\?[;&a-zA-Z\d%_.~+=-]*)?(#[a-zA-Z\d_]*)?$/i;
 
@@ -201,6 +202,20 @@ export default function Page() {
   const [isLoading, setIsLoading] = useState(true)
   const [isAuthChecking, setIsAuthChecking] = useState(true)
   const [user, setUser] = useState<User | null>(null)
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const emailPrefix = user?.email ? user.email.split('@')[0] : user?.uid || "";
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -221,6 +236,28 @@ export default function Page() {
     const minLoadingTimer = setTimeout(() => {
       setIsLoading(false);
     }, 800);
+
+    const ensureUserDoc = async () => {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          const emailPrefix = user.email ? user.email.split('@')[0] : user.uid;
+          await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email,
+            displayName: emailPrefix, // URL ID
+            username: user.displayName, // Real Name
+            photoURL: user.photoURL,
+            bio: "",
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.error("Failed to ensure user doc:", err);
+      }
+    };
+    ensureUserDoc();
 
     const q = query(
       collection(db, "users", user.uid, "links"),
@@ -302,12 +339,17 @@ export default function Page() {
   
   const handleShare = async () => {
     if (!user) return;
-    const url = `${window.location.origin}/${user.uid}`
+    const url = `${window.location.origin}/${emailPrefix}`
     try {
       await navigator.clipboard.writeText(url);
-      alert("링크가 클립보드에 복사되었습니다!");
+      toast.success("링크가 복사되었습니다.", {
+        description: "이제 원하는 곳에 링크를 공유해 보세요."
+      });
     } catch (err) {
       console.error("Failed to copy!", err);
+      toast.error("링크 복사에 실패했습니다.", {
+        description: "다시 시도해 주세요."
+      });
     }
   }
 
@@ -363,10 +405,45 @@ export default function Page() {
         <div className="flex items-center gap-2 font-bold text-xl">
           <span className="bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent">MyLink</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleShare}>공유</Button>
-          <Button variant="outline" size="sm" onClick={() => window.open(`/${user.uid}`, '_blank')}>내 페이지 보기</Button>
-          <Button variant="ghost" size="sm" onClick={handleLogout}>로그아웃</Button>
+        <div className="relative" ref={dropdownRef}>
+          <button 
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="flex items-center gap-2 hover:bg-muted/50 p-1.5 rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {user.photoURL ? (
+              <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-border" />
+            ) : (
+              <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center border border-border text-sm font-bold">
+                {user.displayName?.charAt(0) || "U"}
+              </div>
+            )}
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform text-muted-foreground ${isDropdownOpen ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+
+          {isDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-64 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95 z-50">
+              <div className="flex flex-col p-4 border-b border-border/50 bg-muted/20">
+                <p className="font-semibold text-sm truncate">{user.displayName || "사용자 이름"}</p>
+                <p className="text-xs text-muted-foreground truncate">{user.email || ""}</p>
+              </div>
+              <div className="p-2 flex flex-col gap-1">
+                <Button variant="ghost" className="w-full justify-start text-sm h-9 px-3 font-normal" onClick={() => { setIsDropdownOpen(false); window.open(`/${emailPrefix}`, '_blank'); }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 opacity-70"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  내 페이지 보기
+                </Button>
+                <Button variant="ghost" className="w-full justify-start text-sm h-9 px-3 font-normal" onClick={() => { setIsDropdownOpen(false); handleShare(); }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 opacity-70"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" x2="12" y1="2" y2="15"/></svg>
+                  공유하기
+                </Button>
+              </div>
+              <div className="p-2 border-t border-border/50">
+                <Button variant="ghost" className="w-full justify-start text-sm h-9 px-3 font-normal text-destructive hover:text-destructive hover:bg-destructive/10" onClick={handleLogout}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 opacity-70"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                  로그아웃
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -388,6 +465,10 @@ export default function Page() {
           <div className="flex items-center gap-2 mb-1 cursor-pointer group">
             <h1 className="text-2xl font-extrabold tracking-tight group-hover:text-primary transition-colors">{user.displayName || "사용자 이름"}</h1>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="text-muted-foreground opacity-50 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+          </div>
+          <div className="flex items-center gap-2 mb-2 cursor-pointer group text-primary font-medium">
+            <p>@{emailPrefix}</p>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="opacity-50 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground font-medium cursor-pointer group">
             <p>짧은 소개글을 입력해주세요.</p>
