@@ -604,7 +604,12 @@ export default function Page() {
         <div className="flex items-center gap-2 font-bold text-xl">
           <span className="bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent">MyLink</span>
         </div>
-        <div className="relative" ref={dropdownRef}>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Button variant="outline" size="sm" className="flex h-8 px-2 sm:px-3 text-xs font-medium border-primary/20 hover:bg-primary/5" onClick={() => window.open(`/${emailPrefix}`, '_blank')} title="내 페이지 보기">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="sm:mr-2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span className="hidden sm:inline">내 페이지</span>
+          </Button>
+          <div className="relative" ref={dropdownRef}>
           <button 
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2 hover:bg-muted/50 p-1.5 rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -643,6 +648,7 @@ export default function Page() {
               </div>
             </div>
           )}
+        </div>
         </div>
       </header>
 
