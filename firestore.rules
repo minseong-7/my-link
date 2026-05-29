@@ -1,0 +1,33 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 유저 인증 확인 및 본인 확인을 위한 헬퍼 함수
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // users 컬렉션 (유저 프로필 문서)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+
+      // users/{userId}/links 서브컬렉션
+      match /links/{linkId} {
+        allow read: if true;
+        allow write: if isOwner(userId);
+      }
+      
+      // users/{userId}/profile 서브컬렉션
+      match /profile/{profileId} {
+        allow read: if true;
+        allow write: if isOwner(userId);
+      }
+    }
+  }
+}

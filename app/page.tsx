@@ -36,8 +36,6 @@ type LinkFormValues = z.infer<typeof linkSchema>
 
 const profileSchema = z.object({
   username: z.string().trim().min(1, { message: "이름을 입력해주세요." }),
-  displayName: z.string().trim().min(3, { message: "아이디는 3자 이상이어야 합니다." })
-    .regex(/^[a-zA-Z0-9_.-]+$/, { message: "영문, 숫자, 밑줄, 마침표, 하이픈만 사용할 수 있습니다." }),
   bio: z.string().trim().max(100, { message: "소개글은 100자 이내로 작성해주세요." }).optional()
 })
 
@@ -387,76 +385,23 @@ export default function Page() {
     handleSubmit: handleProfileSubmit,
     formState: { errors: profileErrors, isSubmitting: isProfileSubmitting },
     reset: resetProfile,
-    watch: watchProfile,
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
       username: "",
-      displayName: "",
       bio: "",
     },
     mode: "onChange",
   })
 
-  const watchDisplayName = watchProfile("displayName");
-  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
-  const [duplicateStatus, setDuplicateStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
-  const [lastCheckedDisplayName, setLastCheckedDisplayName] = useState("");
-
-  useEffect(() => {
-    if (watchDisplayName !== lastCheckedDisplayName) {
-      setDuplicateStatus("idle");
-    }
-  }, [watchDisplayName, lastCheckedDisplayName]);
-
   useEffect(() => {
     if (isProfileDialogOpen && profileData) {
       resetProfile({
         username: profileData.username || "",
-        displayName: profileData.displayName || "",
         bio: profileData.bio || "",
       });
-      setLastCheckedDisplayName(profileData.displayName || "");
-      setDuplicateStatus("available"); 
     }
   }, [isProfileDialogOpen, profileData, resetProfile]);
-
-  const checkDuplicate = async () => {
-    if (!watchDisplayName || watchDisplayName.length < 3) {
-      toast.error("아이디를 3자 이상 입력해주세요.");
-      return;
-    }
-    
-    if (watchDisplayName === profileData?.displayName) {
-      setDuplicateStatus("available");
-      setLastCheckedDisplayName(watchDisplayName);
-      toast.success("현재 사용 중인 아이디입니다.");
-      return;
-    }
-
-    try {
-      setIsCheckingDuplicate(true);
-      setDuplicateStatus("checking");
-      const usersRef = collection(db, "users");
-      const q = query(usersRef, where("displayName", "==", watchDisplayName));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        setDuplicateStatus("taken");
-        toast.error("이미 사용 중인 아이디입니다.");
-      } else {
-        setDuplicateStatus("available");
-        setLastCheckedDisplayName(watchDisplayName);
-        toast.success("사용 가능한 아이디입니다!");
-      }
-    } catch (error) {
-      console.error("Duplicate check failed", error);
-      toast.error("중복 확인 중 오류가 발생했습니다.");
-      setDuplicateStatus("idle");
-    } finally {
-      setIsCheckingDuplicate(false);
-    }
-  };
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -469,7 +414,6 @@ export default function Page() {
       queryClient.setQueryData(['profile', user?.uid], (old: any) => ({
         ...old,
         username: newData.username,
-        displayName: newData.displayName,
         bio: newData.bio || "",
       }));
       return { previousProfile };
@@ -493,27 +437,19 @@ export default function Page() {
     
     // 변경된 사항이 없는지 확인
     const currentUsername = profileData?.username || "";
-    const currentDisplayName = profileData?.displayName || "";
     const currentBio = profileData?.bio || "";
     
     if (
       data.username === currentUsername &&
-      data.displayName === currentDisplayName &&
       (data.bio || "") === currentBio
     ) {
       toast.info("변경된 사항이 없습니다.");
       setIsProfileDialogOpen(false);
       return;
     }
-    
-    if (data.displayName !== currentDisplayName && duplicateStatus !== "available") {
-      toast.error("아이디 중복 확인을 해주세요.");
-      return;
-    }
 
     await updateProfileMutation.mutateAsync({
       username: data.username,
-      displayName: data.displayName,
       bio: data.bio || "",
       updatedAt: new Date().toISOString(),
     });
@@ -686,7 +622,7 @@ export default function Page() {
             <DialogHeader>
               <DialogTitle>프로필 수정</DialogTitle>
               <DialogDescription>
-                이름, 아이디(URL), 소개글을 변경할 수 있습니다.
+                이름과 소개글을 변경할 수 있습니다.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleProfileSubmit(onProfileSubmit)}>
@@ -700,29 +636,6 @@ export default function Page() {
                     {...registerProfile("username")}
                   />
                   {profileErrors.username && <p className="text-sm font-medium text-destructive">{profileErrors.username.message}</p>}
-                </div>
-                
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="displayName">사용자 아이디 (URL: @아이디)</Label>
-                  <div className="flex gap-2">
-                    <Input 
-                      id="displayName" 
-                      placeholder="예: my-url-id" 
-                      aria-invalid={!!profileErrors.displayName}
-                      {...registerProfile("displayName")}
-                    />
-                    <Button 
-                      type="button" 
-                      variant="secondary" 
-                      onClick={checkDuplicate}
-                      disabled={isCheckingDuplicate || watchDisplayName === lastCheckedDisplayName}
-                    >
-                      {isCheckingDuplicate ? "확인 중..." : "중복 확인"}
-                    </Button>
-                  </div>
-                  {profileErrors.displayName && <p className="text-sm font-medium text-destructive">{profileErrors.displayName.message}</p>}
-                  {!profileErrors.displayName && duplicateStatus === "available" && <p className="text-sm font-medium text-green-600 dark:text-green-400">사용 가능한 아이디입니다.</p>}
-                  {!profileErrors.displayName && duplicateStatus === "taken" && <p className="text-sm font-medium text-destructive">이미 사용 중인 아이디입니다.</p>}
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -738,7 +651,7 @@ export default function Page() {
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsProfileDialogOpen(false)}>취소</Button>
-                <Button type="submit" disabled={isProfileSubmitting || (duplicateStatus !== "available" && watchDisplayName !== profileData?.displayName)}>
+                <Button type="submit" disabled={isProfileSubmitting}>
                   {isProfileSubmitting ? "저장 중..." : "저장하기"}
                 </Button>
               </DialogFooter>
