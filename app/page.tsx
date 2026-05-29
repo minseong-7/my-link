@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react"
 import { db, auth } from "@/lib/firebase"
-import { collection, addDoc, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, getDoc, setDoc } from "firebase/firestore"
+import { collection, addDoc, query, orderBy, doc, updateDoc, deleteDoc, getDoc, setDoc, where, getDocs } from "firebase/firestore"
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User } from "firebase/auth"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,15 +34,24 @@ const linkSchema = z.object({
 
 type LinkFormValues = z.infer<typeof linkSchema>
 
+const profileSchema = z.object({
+  username: z.string().trim().min(1, { message: "이름을 입력해주세요." }),
+  displayName: z.string().trim().min(3, { message: "아이디는 3자 이상이어야 합니다." })
+    .regex(/^[a-zA-Z0-9_.-]+$/, { message: "영문, 숫자, 밑줄, 마침표, 하이픈만 사용할 수 있습니다." }),
+  bio: z.string().trim().max(100, { message: "소개글은 100자 이내로 작성해주세요." }).optional()
+})
+
+type ProfileFormValues = z.infer<typeof profileSchema>
+
 function LinkItem({ link, userId }: { link: any, userId: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const queryClient = useQueryClient();
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors },
     reset,
   } = useForm<LinkFormValues>({
     resolver: zodResolver(linkSchema),
@@ -52,36 +62,72 @@ function LinkItem({ link, userId }: { link: any, userId: string }) {
     mode: "onSubmit",
   })
 
-  const onUpdate = async (data: LinkFormValues) => {
-    let finalUrl = data.url
-    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-      finalUrl = `https://${finalUrl}`
-    }
-
-    try {
+  const updateMutation = useMutation({
+    mutationFn: async (data: LinkFormValues) => {
+      let finalUrl = data.url
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = `https://${finalUrl}`
+      }
       await new Promise(resolve => setTimeout(resolve, 600));
       await updateDoc(doc(db, "users", userId, "links", link.id), {
         title: data.title,
         url: finalUrl,
         updatedAt: new Date().toISOString(),
       });
+      return { ...link, title: data.title, url: finalUrl };
+    },
+    onMutate: async (newData) => {
+      await queryClient.cancelQueries({ queryKey: ['links', userId] });
+      const previousLinks = queryClient.getQueryData(['links', userId]);
+      
+      let finalUrl = newData.url
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = `https://${finalUrl}`
+      }
+      queryClient.setQueryData(['links', userId], (old: any) => 
+        old?.map((l: any) => l.id === link.id ? { ...l, title: newData.title, url: finalUrl } : l)
+      );
+      return { previousLinks };
+    },
+    onError: (err, newData, context) => {
+      queryClient.setQueryData(['links', userId], context?.previousLinks);
+      console.error("Error updating document: ", err);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['links', userId] });
+    },
+    onSuccess: () => {
       setIsEditing(false);
-    } catch (e) {
-      console.error("Error updating document: ", e);
     }
-  }
+  });
 
-  const onDelete = async () => {
-    try {
-      setIsDeleting(true);
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
       await new Promise(resolve => setTimeout(resolve, 600));
       await deleteDoc(doc(db, "users", userId, "links", link.id));
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['links', userId] });
+      const previousLinks = queryClient.getQueryData(['links', userId]);
+      queryClient.setQueryData(['links', userId], (old: any) => 
+        old?.filter((l: any) => l.id !== link.id)
+      );
+      return { previousLinks };
+    },
+    onError: (err, newTodo, context) => {
+      queryClient.setQueryData(['links', userId], context?.previousLinks);
+      console.error("Error deleting document: ", err);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['links', userId] });
+    },
+    onSuccess: () => {
       setIsDeleteDialogOpen(false);
-    } catch (e) {
-      console.error("Error deleting document: ", e);
-      setIsDeleting(false);
     }
-  }
+  });
+
+  const onUpdate = (data: LinkFormValues) => updateMutation.mutate(data);
+  const onDelete = () => deleteMutation.mutate();
 
   const handleEditCancel = () => {
     setIsEditing(false);
@@ -112,8 +158,8 @@ function LinkItem({ link, userId }: { link: any, userId: string }) {
           </div>
           <div className="flex justify-end gap-2 mt-2">
             <Button type="button" variant="outline" size="sm" onClick={handleEditCancel}>취소</Button>
-            <Button type="submit" size="sm" disabled={isSubmitting}>
-              {isSubmitting ? (
+            <Button type="submit" size="sm" disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? (
                 <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -180,8 +226,8 @@ function LinkItem({ link, userId }: { link: any, userId: string }) {
             </DialogHeader>
             <DialogFooter className="sm:justify-end gap-2 mt-4">
               <Button type="button" variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>취소</Button>
-              <Button type="button" variant="destructive" onClick={onDelete} disabled={isDeleting}>
-                {isDeleting ? (
+              <Button type="button" variant="destructive" onClick={onDelete} disabled={deleteMutation.isPending}>
+                {deleteMutation.isPending ? (
                   <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -197,15 +243,13 @@ function LinkItem({ link, userId }: { link: any, userId: string }) {
 }
 
 export default function Page() {
-  const [links, setLinks] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
   const [isAuthChecking, setIsAuthChecking] = useState(true)
   const [user, setUser] = useState<User | null>(null)
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
+  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
-
-  const emailPrefix = user?.email ? user.email.split('@')[0] : user?.uid || "";
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -221,62 +265,57 @@ export default function Page() {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
       setIsAuthChecking(false)
-      if (!currentUser) {
-        setIsLoading(false)
-        setLinks([])
-      }
     })
     return () => unsubscribeAuth()
   }, [])
 
-  useEffect(() => {
-    if (!user) return;
-
-    setIsLoading(true);
-    const minLoadingTimer = setTimeout(() => {
-      setIsLoading(false);
-    }, 800);
-
-    const ensureUserDoc = async () => {
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          const emailPrefix = user.email ? user.email.split('@')[0] : user.uid;
-          await setDoc(userRef, {
-            uid: user.uid,
-            email: user.email,
-            displayName: emailPrefix, // URL ID
-            username: user.displayName, // Real Name
-            photoURL: user.photoURL,
-            bio: "",
-            createdAt: new Date().toISOString(),
-          });
-        }
-      } catch (err) {
-        console.error("Failed to ensure user doc:", err);
+  const { data: profileData, isLoading: isProfileLoading } = useQuery({
+    queryKey: ['profile', user?.uid],
+    queryFn: async () => {
+      if (!user) return null;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        const defaultEmailPrefix = user.email ? user.email.split('@')[0] : user.uid;
+        const newProfile = {
+          uid: user.uid,
+          email: user.email,
+          displayName: defaultEmailPrefix, // URL ID
+          username: user.displayName, // Real Name
+          photoURL: user.photoURL,
+          bio: "",
+          createdAt: new Date().toISOString(),
+        };
+        await setDoc(userRef, newProfile);
+        return newProfile;
       }
-    };
-    ensureUserDoc();
+      return userSnap.data();
+    },
+    enabled: !!user,
+  });
 
-    const q = query(
-      collection(db, "users", user.uid, "links"),
-      orderBy("createdAt", "desc")
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedLinks = snapshot.docs.map(doc => ({
+  const { data: links = [], isLoading: isLinksLoading } = useQuery({
+    queryKey: ['links', user?.uid],
+    queryFn: async () => {
+      if (!user) return [];
+      const q = query(
+        collection(db, "users", user.uid, "links"),
+        orderBy("createdAt", "desc")
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      setLinks(fetchedLinks);
-    });
+    },
+    enabled: !!user,
+  });
 
-    return () => {
-      clearTimeout(minLoadingTimer);
-      unsubscribe();
-    };
-  }, [user]);
+  const isLoading = isProfileLoading || isLinksLoading;
+
+  const emailPrefix = profileData?.displayName || (user?.email ? user.email.split('@')[0] : user?.uid || "");
+  const realName = profileData?.username || user?.displayName || "사용자 이름";
+  const bio = profileData?.bio || "짧은 소개글을 입력해주세요.";
 
   const {
     register,
@@ -292,33 +331,193 @@ export default function Page() {
     mode: "onChange",
   })
 
-  const onSubmit = async (data: LinkFormValues) => {
-    if (!user) return;
-    let finalUrl = data.url
-    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-      finalUrl = `https://${finalUrl}`
-    }
-
-    try {
+  const addLinkMutation = useMutation({
+    mutationFn: async (data: LinkFormValues) => {
+      let finalUrl = data.url
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = `https://${finalUrl}`
+      }
       await new Promise(resolve => setTimeout(resolve, 600));
-
-      await addDoc(collection(db, "users", user.uid, "links"), {
+      const newDoc = {
         title: data.title,
         url: finalUrl,
         createdAt: new Date().toISOString(),
-      });
-
-      reset()
-      setIsDialogOpen(false)
-    } catch (e) {
-      console.error("Error adding document: ", e);
+      };
+      const docRef = await addDoc(collection(db, "users", user!.uid, "links"), newDoc);
+      return { id: docRef.id, ...newDoc };
+    },
+    onMutate: async (newData) => {
+      await queryClient.cancelQueries({ queryKey: ['links', user?.uid] });
+      const previousLinks = queryClient.getQueryData(['links', user?.uid]);
+      let finalUrl = newData.url
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = `https://${finalUrl}`
+      }
+      queryClient.setQueryData(['links', user?.uid], (old: any) => [
+        { id: "temp-" + Date.now(), title: newData.title, url: finalUrl, createdAt: new Date().toISOString() },
+        ...(old || [])
+      ]);
+      return { previousLinks };
+    },
+    onError: (err, newData, context) => {
+      queryClient.setQueryData(['links', user?.uid], context?.previousLinks);
+      console.error("Error adding document: ", err);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['links', user?.uid] });
+    },
+    onSuccess: () => {
+      reset();
+      setIsDialogOpen(false);
     }
+  });
+
+  const onSubmit = async (data: LinkFormValues) => {
+    if (!user) return;
+    await addLinkMutation.mutateAsync(data);
   }
 
   const handleOpenChange = (open: boolean) => {
     setIsDialogOpen(open)
     if (!open) reset()
   }
+
+  const {
+    register: registerProfile,
+    handleSubmit: handleProfileSubmit,
+    formState: { errors: profileErrors, isSubmitting: isProfileSubmitting },
+    reset: resetProfile,
+    watch: watchProfile,
+  } = useForm<ProfileFormValues>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: {
+      username: "",
+      displayName: "",
+      bio: "",
+    },
+    mode: "onChange",
+  })
+
+  const watchDisplayName = watchProfile("displayName");
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
+  const [duplicateStatus, setDuplicateStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const [lastCheckedDisplayName, setLastCheckedDisplayName] = useState("");
+
+  useEffect(() => {
+    if (watchDisplayName !== lastCheckedDisplayName) {
+      setDuplicateStatus("idle");
+    }
+  }, [watchDisplayName, lastCheckedDisplayName]);
+
+  useEffect(() => {
+    if (isProfileDialogOpen && profileData) {
+      resetProfile({
+        username: profileData.username || "",
+        displayName: profileData.displayName || "",
+        bio: profileData.bio || "",
+      });
+      setLastCheckedDisplayName(profileData.displayName || "");
+      setDuplicateStatus("available"); 
+    }
+  }, [isProfileDialogOpen, profileData, resetProfile]);
+
+  const checkDuplicate = async () => {
+    if (!watchDisplayName || watchDisplayName.length < 3) {
+      toast.error("아이디를 3자 이상 입력해주세요.");
+      return;
+    }
+    
+    if (watchDisplayName === profileData?.displayName) {
+      setDuplicateStatus("available");
+      setLastCheckedDisplayName(watchDisplayName);
+      toast.success("현재 사용 중인 아이디입니다.");
+      return;
+    }
+
+    try {
+      setIsCheckingDuplicate(true);
+      setDuplicateStatus("checking");
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("displayName", "==", watchDisplayName));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        setDuplicateStatus("taken");
+        toast.error("이미 사용 중인 아이디입니다.");
+      } else {
+        setDuplicateStatus("available");
+        setLastCheckedDisplayName(watchDisplayName);
+        toast.success("사용 가능한 아이디입니다!");
+      }
+    } catch (error) {
+      console.error("Duplicate check failed", error);
+      toast.error("중복 확인 중 오류가 발생했습니다.");
+      setDuplicateStatus("idle");
+    } finally {
+      setIsCheckingDuplicate(false);
+    }
+  };
+
+  const updateProfileMutation = useMutation({
+    mutationFn: async (data: any) => {
+      await updateDoc(doc(db, "users", user!.uid), data);
+    },
+    onMutate: async (newData) => {
+      await queryClient.cancelQueries({ queryKey: ['profile', user?.uid] });
+      const previousProfile = queryClient.getQueryData(['profile', user?.uid]);
+      
+      queryClient.setQueryData(['profile', user?.uid], (old: any) => ({
+        ...old,
+        username: newData.username,
+        displayName: newData.displayName,
+        bio: newData.bio || "",
+      }));
+      return { previousProfile };
+    },
+    onError: (err, newData, context) => {
+      queryClient.setQueryData(['profile', user?.uid], context?.previousProfile);
+      console.error("Failed to update profile", err);
+      toast.error("프로필 업데이트에 실패했습니다.");
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['profile', user?.uid] });
+    },
+    onSuccess: () => {
+      toast.success("프로필이 업데이트 되었습니다.");
+      setIsProfileDialogOpen(false);
+    }
+  });
+
+  const onProfileSubmit = async (data: ProfileFormValues) => {
+    if (!user) return;
+    
+    // 변경된 사항이 없는지 확인
+    const currentUsername = profileData?.username || "";
+    const currentDisplayName = profileData?.displayName || "";
+    const currentBio = profileData?.bio || "";
+    
+    if (
+      data.username === currentUsername &&
+      data.displayName === currentDisplayName &&
+      (data.bio || "") === currentBio
+    ) {
+      toast.info("변경된 사항이 없습니다.");
+      setIsProfileDialogOpen(false);
+      return;
+    }
+    
+    if (data.displayName !== currentDisplayName && duplicateStatus !== "available") {
+      toast.error("아이디 중복 확인을 해주세요.");
+      return;
+    }
+
+    await updateProfileMutation.mutateAsync({
+      username: data.username,
+      displayName: data.displayName,
+      bio: data.bio || "",
+      updatedAt: new Date().toISOString(),
+    });
+  };
 
   const handleLogin = async () => {
     const provider = new GoogleAuthProvider()
@@ -450,31 +649,96 @@ export default function Page() {
       <div className="z-10 flex w-full max-w-md flex-col gap-6 mt-8 mb-12 px-6">
         {/* Profile Area */}
         <div className="mb-4 text-center flex flex-col items-center">
-          <div className="relative w-28 h-28 mx-auto mb-4">
+          <div className="relative w-28 h-28 mx-auto mb-4" onClick={() => setIsProfileDialogOpen(true)}>
             {user.photoURL ? (
-              <img src={user.photoURL} alt="Profile" className="w-full h-full rounded-full object-cover border-4 border-background shadow-lg" />
+              <img src={user.photoURL} alt="Profile" className="w-full h-full rounded-full object-cover border-4 border-background shadow-lg cursor-pointer" />
             ) : (
-              <div className="w-full h-full bg-muted rounded-full flex items-center justify-center border-4 border-background shadow-lg text-2xl font-bold">
-                {user.displayName?.charAt(0) || "U"}
+              <div className="w-full h-full bg-muted rounded-full flex items-center justify-center border-4 border-background shadow-lg text-2xl font-bold cursor-pointer">
+                {realName.charAt(0) || "U"}
               </div>
             )}
             <div className="absolute bottom-0 right-0 bg-background p-1.5 rounded-full border border-border shadow-sm cursor-pointer hover:bg-muted transition-colors">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
             </div>
           </div>
-          <div className="flex items-center gap-2 mb-1 cursor-pointer group">
-            <h1 className="text-2xl font-extrabold tracking-tight group-hover:text-primary transition-colors">{user.displayName || "사용자 이름"}</h1>
+          <div className="flex items-center gap-2 mb-1 cursor-pointer group" onClick={() => setIsProfileDialogOpen(true)}>
+            <h1 className="text-2xl font-extrabold tracking-tight group-hover:text-primary transition-colors">{realName}</h1>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="text-muted-foreground opacity-50 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
           </div>
-          <div className="flex items-center gap-2 mb-2 cursor-pointer group text-primary font-medium">
+          <div className="flex items-center gap-2 mb-2 cursor-pointer group text-primary font-medium" onClick={() => setIsProfileDialogOpen(true)}>
             <p>@{emailPrefix}</p>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="opacity-50 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
           </div>
-          <div className="flex items-center gap-2 text-muted-foreground font-medium cursor-pointer group">
-            <p>짧은 소개글을 입력해주세요.</p>
+          <div className="flex items-center gap-2 text-muted-foreground font-medium cursor-pointer group" onClick={() => setIsProfileDialogOpen(true)}>
+            <p>{bio}</p>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="text-muted-foreground opacity-50 group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
           </div>
         </div>
+
+        <Dialog open={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>프로필 수정</DialogTitle>
+              <DialogDescription>
+                이름, 아이디(URL), 소개글을 변경할 수 있습니다.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleProfileSubmit(onProfileSubmit)}>
+              <div className="flex flex-col gap-4 py-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="username">이름 (디스플레이 이름)</Label>
+                  <Input 
+                    id="username" 
+                    placeholder="예: 홍길동" 
+                    aria-invalid={!!profileErrors.username}
+                    {...registerProfile("username")}
+                  />
+                  {profileErrors.username && <p className="text-sm font-medium text-destructive">{profileErrors.username.message}</p>}
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="displayName">사용자 아이디 (URL: @아이디)</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      id="displayName" 
+                      placeholder="예: my-url-id" 
+                      aria-invalid={!!profileErrors.displayName}
+                      {...registerProfile("displayName")}
+                    />
+                    <Button 
+                      type="button" 
+                      variant="secondary" 
+                      onClick={checkDuplicate}
+                      disabled={isCheckingDuplicate || watchDisplayName === lastCheckedDisplayName}
+                    >
+                      {isCheckingDuplicate ? "확인 중..." : "중복 확인"}
+                    </Button>
+                  </div>
+                  {profileErrors.displayName && <p className="text-sm font-medium text-destructive">{profileErrors.displayName.message}</p>}
+                  {!profileErrors.displayName && duplicateStatus === "available" && <p className="text-sm font-medium text-green-600 dark:text-green-400">사용 가능한 아이디입니다.</p>}
+                  {!profileErrors.displayName && duplicateStatus === "taken" && <p className="text-sm font-medium text-destructive">이미 사용 중인 아이디입니다.</p>}
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="bio">소개글</Label>
+                  <Input 
+                    id="bio" 
+                    placeholder="짧은 소개글을 입력해주세요." 
+                    aria-invalid={!!profileErrors.bio}
+                    {...registerProfile("bio")}
+                  />
+                  {profileErrors.bio && <p className="text-sm font-medium text-destructive">{profileErrors.bio.message}</p>}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsProfileDialogOpen(false)}>취소</Button>
+                <Button type="submit" disabled={isProfileSubmitting || (duplicateStatus !== "available" && watchDisplayName !== profileData?.displayName)}>
+                  {isProfileSubmitting ? "저장 중..." : "저장하기"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         <div className="flex flex-col gap-4">
           <Dialog open={isDialogOpen} onOpenChange={handleOpenChange}>

@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "sonner"
 import { cn } from "@/lib/utils";
+import { Providers } from "./providers";
 
 const fontSans = Geist({
   subsets: ["latin"],
@@ -23,9 +24,10 @@ export default function RootLayout({
       className={cn("antialiased font-sans", fontSans.variable)}
     >
       <body>
-        <ThemeProvider>
-          {children}
-          <Toaster 
+        <Providers>
+          <ThemeProvider>
+            {children}
+            <Toaster 
             position="top-center" 
             toastOptions={{
               classNames: {
@@ -37,6 +39,7 @@ export default function RootLayout({
             }}
           />
         </ThemeProvider>
+        </Providers>
       </body>
     </html>
   )
